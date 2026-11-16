@@ -1,0 +1,30 @@
+Sistema Rotafrente        (Sistema_Rotafrente1.jpg / Sistema_Rotafrente2.jpg)
+-----------------------------------------------------------------------------
+ hallar_formato_Caso Recuperamos la zona y el formato
+
+
+
+
+
+
+
+
+----------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------
+
+
+
+EM - Frente
+
+
+Buzamiento: 
+rayo perpendicular es con referencia a EM (formar 90 grados) aqui se forma EP
+Rayo diagonal es la que hace con referencia a Frente (Forma 90 grados) aqui se forma PC
+
+EM - Frente-F1-F8
+
+    Procesos
+----------------------
+1.  procesarRumboVeta: (procesarRumboVeta - 248)
+    Permite realizar el calculo del Rumbo de Veta (Rv)
+

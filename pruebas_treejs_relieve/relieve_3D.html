@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Relieve 3D · SRTM</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background: #070b14;
+            color: #e8eef8;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #view {
+            position: fixed;
+            inset: 0;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .panel {
+            position: fixed;
+            top: 14px;
+            left: 14px;
+            z-index: 10;
+            width: min(340px, calc(100vw - 28px));
+            max-height: calc(100vh - 28px);
+            overflow: auto;
+            padding: 14px;
+            border-radius: 14px;
+            background: rgba(10, 16, 28, 0.92);
+            border: 1px solid rgba(80, 100, 130, 0.45);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+        }
+
+        h1 {
+            font-size: 15px;
+            font-weight: 650;
+            margin-bottom: 4px;
+        }
+
+        .sub {
+            font-size: 11px;
+            color: #93a4bd;
+            line-height: 1.4;
+            margin-bottom: 12px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        label {
+            font-size: 11px;
+            color: #93a4bd;
+            min-width: 70px;
+        }
+
+        input[type="number"] {
+            width: 84px;
+            background: #111a2b;
+            border: 1px solid #2c3e5a;
+            color: #e8eef8;
+            border-radius: 8px;
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #22d3ee;
+            color: #041016;
+        }
+
+        button:hover {
+            filter: brightness(1.06);
+        }
+
+        button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        button.sec {
+            background: #2a3a52;
+            color: #e8eef8;
+        }
+
+        #status {
+            font-size: 12px;
+            min-height: 18px;
+            margin: 8px 0;
+            color: #93a4bd;
+        }
+
+        #status.ok {
+            color: #4ade80;
+        }
+
+        #status.err {
+            color: #f87171;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .stat {
+            background: #111a2b;
+            border: 1px solid #24344c;
+            border-radius: 10px;
+            padding: 8px;
+        }
+
+        .stat b {
+            display: block;
+            font-size: 14px;
+            color: #22d3ee;
+        }
+
+        .stat span {
+            font-size: 10px;
+            color: #93a4bd;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .hint {
+            position: fixed;
+            left: 50%;
+            bottom: 12px;
+            transform: translateX(-50%);
+            font-size: 11px;
+            color: #64748b;
+            z-index: 10;
+            pointer-events: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="view"></div>
+
+    <div class="panel">
+        <h1>Relieve 3D real</h1>
+        <p class="sub">
+            Superficie sólida desde OpenTopoData (SRTM 30 m). Cusco / Andes por defecto.
+        </p>
+
+        <div class="row">
+            <label>Lat</label>
+            <input id="lat" type="number" step="0.0001" value="-13.5300" />
+            <label>Lng</label>
+            <input id="lng" type="number" step="0.0001" value="-71.9700" />
+        </div>
+        <div class="row">
+            <label>Radio m</label>
+            <input id="radius" type="number" value="600" min="200" max="2000" step="50" />
+            <label>Grilla</label>
+            <input id="grid" type="number" value="40" min="20" max="80" step="5" />
+        </div>
+        <div class="row">
+            <label>Exagerar</label>
+            <input id="exag" type="number" value="1.8" min="1" max="4" step="0.1" />
+        </div>
+
+        <div class="row">
+            <button id="btnLoad">Cargar relieve</button>
+            <button id="btnDemo" class="sec">Demo local</button>
+            <button id="btnFrame" class="sec">Centrar</button>
+        </div>
+
+        <div id="status">Listo.</div>
+        <div class="stats">
+            <div class="stat"><span>Puntos</span><b id="sPts">—</b></div>
+            <div class="stat"><span>Paso</span><b id="sStep">—</b></div>
+            <div class="stat"><span>Mín</span><b id="sMin">—</b></div>
+            <div class="stat"><span>Máx</span><b id="sMax">—</b></div>
+        </div>
+    </div>
+
+    <div class="hint">Arrastra = rotar · rueda = zoom · clic derecho = desplazar</div>
+
+    <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.168.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.168.0/examples/jsm/"
+    }
+  }
+  </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const view = document.getElementById('view');
+        const statusEl = document.getElementById('status');
+        const sPts = document.getElementById('sPts');
+        const sStep = document.getElementById('sStep');
+        const sMin = document.getElementById('sMin');
+        const sMax = document.getElementById('sMax');
+
+        let scene, camera, renderer, controls;
+        let terrain = null;
+        let base = null;
+        let exag = 1.8;
+
+        function setStatus(msg, kind = '') {
+            statusEl.textContent = msg;
+            statusEl.className = kind;
+        }
+
+        function colorFor(h, hMin, hMax) {
+            const t = Math.max(0, Math.min(1, (h - hMin) / Math.max(1, hMax - hMin)));
+            // verde valle → beige → marrón → casi blanco
+            const stops = [
+                [0.00, [0x2f, 0x6b, 0x3a]],
+                [0.30, [0x7f, 0xa8, 0x5a]],
+                [0.55, [0xd4, 0xc4, 0x8a]],
+                [0.80, [0x9c, 0x6b, 0x43]],
+                [1.00, [0xec, 0xeb, 0xe6]],
+            ];
+            for (let i = 1; i < stops.length; i++) {
+                const [t1, c1] = stops[i - 1];
+                const [t2, c2] = stops[i];
+                if (t <= t2) {
+                    const u = (t - t1) / (t2 - t1 || 1);
+                    return new THREE.Color(
+                        (c1[0] + (c2[0] - c1[0]) * u) / 255,
+                        (c1[1] + (c2[1] - c1[1]) * u) / 255,
+                        (c1[2] + (c2[2] - c1[2]) * u) / 255
+                    );
+                }
+            }
+            return new THREE.Color(0xecebe6);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x070b14);
+
+            camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
+            camera.position.set(400, 300, 400);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+            view.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.target.set(0, 80, 0);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+            const sun = new THREE.DirectionalLight(0xfff2dd, 1.7);
+            sun.position.set(500, 900, 250);
+            scene.add(sun);
+            const fill = new THREE.DirectionalLight(0x9db7ff, 0.55);
+            fill.position.set(-400, 400, -300);
+            scene.add(fill);
+            scene.add(new THREE.HemisphereLight(0xb7c9ff, 0x1a2230, 0.45));
+
+            window.addEventListener('resize', resize);
+            resize();
+            animate();
+        }
+
+        function resize() {
+            const w = view.clientWidth || innerWidth;
+            const h = view.clientHeight || innerHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h, false);
+        }
+
+        function clearTerrain() {
+            if (terrain) {
+                scene.remove(terrain);
+                terrain.geometry.dispose();
+                terrain.material.dispose();
+                terrain = null;
+            }
+            if (base) {
+                scene.remove(base);
+                base.geometry.dispose();
+                base.material.dispose();
+                base = null;
+            }
+        }
+
+        /** heights: row-major array length cols*rows */
+        function buildMesh(cols, rows, step, heights) {
+            clearTerrain();
+            exag = Number(document.getElementById('exag').value) || 1.8;
+
+            let hMin = Infinity;
+            let hMax = -Infinity;
+            for (const h of heights) {
+                if (h == null || Number.isNaN(h)) continue;
+                if (h < hMin) hMin = h;
+                if (h > hMax) hMax = h;
+            }
+            if (!Number.isFinite(hMin)) {
+                throw new Error('No hay alturas válidas');
+            }
+
+            // Altura local: restamos hMin para que el bloque no quede a miles de metros
+            const positions = new Float32Array(cols * rows * 3);
+            const colors = new Float32Array(cols * rows * 3);
+            const halfW = ((cols - 1) * step) / 2;
+            const halfD = ((rows - 1) * step) / 2;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const i = r * cols + c;
+                    let h = heights[i];
+                    if (h == null || Number.isNaN(h)) h = hMin;
+                    const x = c * step - halfW;
+                    const y = (h - hMin) * exag;
+                    const z = r * step - halfD;
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = z;
+                    const col = colorFor(h, hMin, hMax);
+                    colors[i * 3] = col.r;
+                    colors[i * 3 + 1] = col.g;
+                    colors[i * 3 + 2] = col.b;
+                }
+            }
+
+            const indices = [];
+            for (let r = 0; r < rows - 1; r++) {
+                for (let c = 0; c < cols - 1; c++) {
+                    const a = r * cols + c;
+                    const b = a + 1;
+                    const d = a + cols;
+                    const e = d + 1;
+                    indices.push(a, b, d, b, e, d);
+                }
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            geo.setIndex(indices);
+            geo.computeVertexNormals();
+
+            const mat = new THREE.MeshStandardMaterial({
+                vertexColors: true,
+                roughness: 0.72,
+                metalness: 0.02,
+                flatShading: false,
+                side: THREE.DoubleSide,
+            });
+
+            terrain = new THREE.Mesh(geo, mat);
+            scene.add(terrain);
+
+            // Faldón simple bajo el bloque
+            const spanY = Math.max(40, (hMax - hMin) * exag + 40);
+            const baseGeo = new THREE.BoxGeometry((cols - 1) * step, spanY, (rows - 1) * step);
+            const baseMat = new THREE.MeshStandardMaterial({
+                color: 0x1a2436,
+                roughness: 1,
+                metalness: 0,
+            });
+            base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = -spanY / 2;
+            scene.add(base);
+
+            sPts.textContent = `${cols}×${rows}`;
+            sStep.textContent = `${step.toFixed(0)} m`;
+            sMin.textContent = `${hMin.toFixed(0)} m`;
+            sMax.textContent = `${hMax.toFixed(0)} m`;
+
+            frameCamera();
+        }
+
+        function frameCamera() {
+            if (!terrain) return;
+            const box = new THREE.Box3().setFromObject(terrain);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z, 50);
+            const dist = maxDim * 1.7;
+
+            camera.position.set(
+                center.x + dist * 0.75,
+                center.y + dist * 0.55,
+                center.z + dist * 0.75
+            );
+            controls.target.copy(center);
+            camera.near = Math.max(0.1, maxDim / 300);
+            camera.far = Math.max(5000, maxDim * 40);
+            camera.updateProjectionMatrix();
+            controls.update();
+        }
+
+        function buildDemo() {
+            const cols = 48;
+            const rows = 48;
+            const step = 18;
+            const heights = [];
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const dx = (c - cols / 2) / (cols / 2);
+                    const dz = (r - rows / 2) / (rows / 2);
+                    const rad = Math.sqrt(dx * dx + dz * dz);
+                    const peak = 220 * Math.exp(-rad * rad * 2.2);
+                    const ridge = 45 * Math.exp(-((dx * 0.8 - dz * 0.3) ** 2) * 6);
+                    const wave = 18 * Math.sin(c * 0.35) * Math.cos(r * 0.3);
+                    heights.push(3200 + peak + ridge + wave);
+                }
+            }
+            buildMesh(cols, rows, step, heights);
+            setStatus('Demo local cargado (colina sólida).', 'ok');
+        }
+
+        async function loadApi() {
+            const lat0 = Number(document.getElementById('lat').value);
+            const lng0 = Number(document.getElementById('lng').value);
+            const radius = Number(document.getElementById('radius').value) || 600;
+            const cols = Math.max(20, Math.min(80, Number(document.getElementById('grid').value) || 40));
+            const rows = cols;
+
+            const step = (radius * 2) / (cols - 1);
+            // grados por metro aprox
+            const metersPerDegLat = 111320;
+            const metersPerDegLng = 111320 * Math.cos((lat0 * Math.PI) / 180);
+            const stepLat = step / metersPerDegLat;
+            const stepLng = step / metersPerDegLng;
+
+            // grilla centrada en lat0,lng0
+            const originLat = lat0 + ((rows - 1) * stepLat) / 2;
+            const originLng = lng0 - ((cols - 1) * stepLng) / 2;
+
+            const locations = [];
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const lat = originLat - r * stepLat;
+                    const lng = originLng + c * stepLng;
+                    locations.push(`${lat.toFixed(6)},${lng.toFixed(6)}`);
+                }
+            }
+
+            const BATCH = 100;
+            const heights = [];
+            const btn = document.getElementById('btnLoad');
+            btn.disabled = true;
+
+            try {
+                for (let i = 0; i < locations.length; i += BATCH) {
+                    const batch = locations.slice(i, i + BATCH);
+                    setStatus(`Cargando API… ${Math.min(i + BATCH, locations.length)}/${locations.length}`);
+                    const url =
+                        'https://api.opentopodata.org/v1/srtm30m?locations=' +
+                        encodeURIComponent(batch.join('|'));
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    const data = await res.json();
+                    if (data.status !== 'OK') throw new Error(data.status || 'API error');
+                    for (const row of data.results) {
+                        heights.push(row.elevation);
+                    }
+                    // respeta rate limit suave
+                    if (i + BATCH < locations.length) {
+                        await new Promise((r) => setTimeout(r, 300));
+                    }
+                }
+
+                if (heights.length !== cols * rows) {
+                    throw new Error(`Se esperaban ${cols * rows} alturas y llegaron ${heights.length}`);
+                }
+
+                // filtra nulls
+                const clean = heights.map((h) => (h == null ? 0 : h));
+                buildMesh(cols, rows, step, clean);
+                setStatus(
+                    `Relieve real cargado · ${lat0.toFixed(4)}, ${lng0.toFixed(4)} · paso ${step.toFixed(0)} m`,
+                    'ok'
+                );
+            } catch (err) {
+                console.error(err);
+                setStatus('Error API: ' + err.message + ' — prueba Demo local.', 'err');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('btnLoad').addEventListener('click', loadApi);
+        document.getElementById('btnDemo').addEventListener('click', buildDemo);
+        document.getElementById('btnFrame').addEventListener('click', frameCamera);
+
+        init();
+        buildDemo();
+    </script>
+</body>
+
+</html>

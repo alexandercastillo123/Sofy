@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relieve 3D + Veta - OpenTopoData</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #05070e; color: #e8eaf2; overflow: hidden; }
+  #canvas-wrap { position: fixed; inset: 0; z-index: 0; }
+  #canvas-wrap canvas { display: block; width: 100vw; height: 100vh; }
+  .ui { position: fixed; inset: 0; z-index: 10; pointer-events: none; padding: 16px; display: flex; flex-direction: column; justify-content: flex-start; }
+  .panel { pointer-events: auto; background: rgba(12, 18, 32, 0.88); border: 1px solid rgba(55, 65, 81, 0.6); border-radius: 16px; padding: 18px; max-width: 380px; box-shadow: 0 24px 60px -12px rgba(0,0,0,0.6); backdrop-filter: blur(10px); }
+  header { margin-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 10px; }
+  h1 { font-size: 17px; margin-bottom: 4px; letter-spacing: -0.5px; color: #ffffff; }
+  p.sub { color: #94a3b8; font-size: 11px; line-height: 1.4; }
+  .actions { margin-top: 12px; display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+  input[type="file"] { color: #cbd5e1; font-size: 11px; }
+  button { background: #22d3ee; color: #020617; border: none; border-radius: 8px; padding: 7px 14px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  button:hover { background: #67e8f9; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: #334155; color: #e2e8f0; }
+  button.secondary:hover { background: #475569; }
+  button.secondary.active { background: #22d3ee; color: #020617; }
+  #status { margin-top: 10px; font-size: 11px; min-height: 14px; }
+  .ok { color: #4ade80; }
+  .err { color: #f87171; }
+  .hint { color: #94a3b8; }
+  .stats { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(30, 41, 59, 0.8); border-radius: 10px; padding: 10px; }
+  .stat .v { font-size: 16px; font-weight: 700; color: #22d3ee; }
+  .stat .l { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+  .row { margin-top: 10px; display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+  .row label { font-size: 10px; color: #94a3b8; }
+  input[type=range] { width: 115px; accent-color: #22d3ee; cursor: pointer; }
+  .val { font-size: 10px; color: #e2e8f0; min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .legend { margin-top: 12px; font-size: 9px; color: #94a3b8; display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 6px; vertical-align: middle; border: 1px solid rgba(255,255,255,0.25); }
+  .controls-hint { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); color: #64748b; font-size: 10px; pointer-events: none; z-index: 10; }
+  .geo { font-size: 11px; color: #94a3b8; margin-top: 5px; }
+  .badge { display: inline-block; margin-top: 8px; font-size: 9px; color: #22d3ee; border: 1px solid rgba(34,211,238,0.35); border-radius: 8px; padding: 4px 10px; background: rgba(34,211,238,0.1); }
+  .view-actions { margin-top: 12px; display: flex; gap: 7px; flex-wrap: wrap; }
+  .layer-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .layer-group h3 { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .layer-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .layer-row input[type=checkbox] { width: 16px; height: 16px; accent-color: #22d3ee; cursor: pointer; }
+  .layer-row label { font-size: 10px; color: #cbd5e1; cursor: pointer; }
+  .layer-row label:hover { color: #ffffff; }
+  .api-note { margin-top: 12px; font-size: 8.5px; color: #64748b; line-height: 1.3; }
+</style>
+</head>
+<body>
+<div id="canvas-wrap"></div>
+
+<div class="ui">
+  <div class="panel">
+    <header>
+      <h1>Relieve 3D + Veta</h1>
+      <p class="sub">OpenTopoData (SRTM 30m) &mdash; cotas reales + plano de veta, trayectorias y contornos</p>
+      <div class="geo" id="geo">Cargando desde API...</div>
+      <div class="badge" id="modeBadge">Modo: API + Veta</div>
+    </header>
+
+    <div class="actions">
+      <button id="btnLoadApi">Cargar API</button>
+      <input type="file" id="file" accept=".hgt">
+      <button id="btnReload" class="secondary" disabled>Reiniciar vista</button>
+    </div>
+
+    <div id="status" class="hint">Consultando OpenTopoData...</div>
+
+    <div class="stats" id="stats" style="display:none;">
+      <div class="stat"><div class="l">Puntos</div><div class="v" id="statDim">-</div></div>
+      <div class="stat"><div class="l">Elev. m&iacute;n.</div><div class="v" id="statMin">-</div></div>
+      <div class="stat"><div class="l">Elev. m&aacute;x.</div><div class="v" id="statMax">-</div></div>
+      <div class="stat"><div class="l">Elev. media</div><div class="v" id="statMean">-</div></div>
+    </div>
+
+    <div class="view-actions">
+      <button id="btnViewIso" class="secondary">Vista isomÃ©trica</button>
+      <button id="btnViewFront" class="secondary">Vista frente</button>
+      <button id="btnViewTop" class="secondary">Vista cenital</button>
+    </div>
+
+    <div class="row">
+      <label>Rumbo (strike)</label>
+      <input type="range" id="strike" min="0" max="360" value="45">
+      <span class="val" id="valStrike">45&deg;</span>
+    </div>
+    <div class="row">
+      <label>Buzamiento (dip)</label>
+      <input type="range" id="dip" min="0" max="90" value="65">
+      <span class="val" id="valDip">65&deg;</span>
+    </div>
+    <div class="row">
+      <label>Exageraci&oacute;n Y</label>
+      <input type="range" id="exag" min="0.5" max="10" step="0.1" value="3.0">
+      <span class="val" id="valExag">3.0x</span>
+    </div>
+
+    <div class="legend" id="legend" style="display:none;">
+      <span><span class="swatch" style="background:#08306b"></span>&lt; 500 m</span>
+      <span><span class="swatch" style="background:#08589e"></span>500&ndash;1500 m</span>
+      <span><span class="swatch" style="background:#2b8cbe"></span>1500&ndash;2500 m</span>
+      <span><span class="swatch" style="background:#4eb3d3"></span>2500&ndash;3500 m</span>
+      <span><span class="swatch" style="background:#7fcdbb"></span>3500&ndash;4500 m</span>
+      <span><span class="swatch" style="background:#c7e9b4"></span>&gt; 4500 m</span>
+    </div>
+
+    <div class="layer-group">
+      <h3>Capas</h3>
+      <div class="layer-row"><input type="checkbox" id="chkTerrain" checked><label for="chkTerrain">Terreno (malla)</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkContours" checked><label for="chkContours">Líneas de contorno</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkVein" checked><label for="chkVein">Plano de veta</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkTraj" checked><label for="chkTraj">Trayectorias</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkPins" checked><label for="chkPins">Pines AF / BM</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkAxes" checked><label for="chkAxes">Ejes Este/Cota/Norte</label></div>
+      <div class="layer-row"><input type="checkbox" id="chkBox" checked><label for="chkBox">Caja de contenciÃ³n</label></div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="btnVein" class="secondary">Todo</button>
+      <button id="btnHide" class="secondary">Ocultar capas</button>
+    </div>
+
+    <div class="api-note">Fuente: https://api.opentopodata.org/v1/srtm30m (JSON, sin instalar nada)</div>
+  </div>
+
+  <div class="controls-hint">Click + arrastrar: rotar &middot; Rueda: zoom &middot; Clic derecho: desplazar</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.160.0",
+    "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const btnLoadApi = document.getElementById('btnLoadApi');
+const fileInput = document.getElementById('file');
+const btnReload = document.getElementById('btnReload');
+const btnViewIso = document.getElementById('btnViewIso');
+const btnViewFront = document.getElementById('btnViewFront');
+const btnViewTop = document.getElementById('btnViewTop');
+const btnVein = document.getElementById('btnVein');
+const btnHide = document.getElementById('btnHide');
+const status = document.getElementById('status');
+const statsBox = document.getElementById('stats');
+const legend = document.getElementById('legend');
+const elDim = document.getElementById('statDim');
+const elMin = document.getElementById('statMin');
+const elMax = document.getElementById('statMax');
+const elMean = document.getElementById('statMean');
+const geoEl = document.getElementById('geo');
+const modeBadge = document.getElementById('modeBadge');
+const inpStrike = document.getElementById('strike');
+const inpDip = document.getElementById('dip');
+const inpExag = document.getElementById('exag');
+const valStrike = document.getElementById('valStrike');
+const valDip = document.getElementById('valDip');
+const valExag = document.getElementById('valExag');
+
+const chkTerrain = document.getElementById('chkTerrain');
+const chkContours = document.getElementById('chkContours');
+const chkVein = document.getElementById('chkVein');
+const chkTraj = document.getElementById('chkTraj');
+const chkPins = document.getElementById('chkPins');
+const chkAxes = document.getElementById('chkAxes');
+const chkBox = document.getElementById('chkBox');
+
+const container = document.getElementById('canvas-wrap');
+
+let scene, camera, renderer, controls;
+let terrainMesh = null;
+let contoursGroup = null;
+let veinGroup = null;
+let trajGroup = null;
+let pinsGroup = null;
+let axesHelper = null;
+let boxHelper = null;
+let showTerrain = true, showContours = true, showVein = true, showTraj = true, showPins = true, showAxes = true, showBox = true;
+let centerX = 0, centerZ = 0, minCota = 0, maxCota = 0;
+let exag = 3.0;
+let currentCols = 0, currentRows = 0, currentStep = 0;
+let currentHeights = null;
+let currentOriginLat = -13.53, currentOriginLng = -71.97;
+
+function initThree(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x060a14);
+  scene.fog = new THREE.Fog(0x060a14, 2500, 12000);
+
+  camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 1, 25000);
+  camera.position.set(1000, 900, 1000);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ReinhardToneMapping;
+  renderer.toneMappingExposure = 1.25;
+  container.appendChild(renderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.minDistance = 20;
+  controls.maxDistance = 15000;
+  controls.enablePan = true;
+
+  // Luz ambiental base
+  const ambLight = new THREE.AmbientLight(0xffffff, 0.3);
+  scene.add(ambLight);
+
+  // Luz direccional principal (sol) - define el relieve con sombras
+  const dirLight = new THREE.DirectionalLight(0xfff5e6, 1.4);
+  dirLight.position.set(1000, 2000, 800);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.width = 2048;
+  dirLight.shadow.mapSize.height = 2048;
+  dirLight.shadow.bias = -0.0005;
+  dirLight.shadow.camera.near = 200;
+  dirLight.shadow.camera.far = 4000;
+  dirLight.shadow.camera.left = -1300;
+  dirLight.shadow.camera.right = 1300;
+  dirLight.shadow.camera.top = 1300;
+  dirLight.shadow.camera.bottom = -1300;
+  scene.add(dirLight);
+
+  // Luz de relleno desde el lado opuesto
+  const fillLight = new THREE.DirectionalLight(0x8bb8ff, 0.6);
+  fillLight.position.set(-900, 800, -700);
+  scene.add(fillLight);
+
+  // Luz de contorno desde arriba (resalta crestas y aristas)
+  const rimLight = new THREE.SpotLight(0xffd8a6, 2.2);
+  rimLight.position.set(0, 1800, 0);
+  rimLight.angle = Math.PI / 5;
+  rimLight.penumbra = 0.7;
+  rimLight.decay = 1;
+  rimLight.distance = 3500;
+  scene.add(rimLight);
+
+  // HemisphereLight cielo/suelo
+  const hemiLight = new THREE.HemisphereLight(0x9cc3ff, 0x1a1a2e, 0.8);
+  scene.add(hemiLight);
+
+  // Luz puntual cálida cerca del centro
+  const pointLight = new THREE.PointLight(0xffc080, 0.8, 1600);
+  pointLight.position.set(0, 250, 0);
+  scene.add(pointLight);
+
+  // Grid de referencia en el suelo
+  const grid = new THREE.GridHelper(2600, 80, 0x1f2937, 0x0b1220);
+  grid.position.y = 0;
+  scene.add(grid);
+
+  window.addEventListener('resize', onWindowResize);
+}
+
+function onWindowResize(){
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+}
+
+/* ================= Colores por elevaciÃ³n ================= */
+function colorFor(v, vmin, vmax){
+  if (v === null || v === undefined) return new THREE.Color(0x060a14);
+  const t = Math.max(0, Math.min(1, (v - vmin) / Math.max(1, (vmax - vmin))));
+  let r, g, b;
+  if (t < 0.18) { r = 5; g = 32 + (t/0.18)*60; b = 70 + (t/0.18)*60; }
+  else if (t < 0.38) { r = 18 + ((t-0.18)/0.20)*85; g = 96 + ((t-0.18)/0.20)*95; b = 140 + ((t-0.18)/0.20)*70; }
+  else if (t < 0.58) { r = 30 + ((t-0.38)/0.20)*115; g = 124 + ((t-0.38)/0.20)*92; b = 52; }
+  else if (t < 0.82) { r = 128 + ((t-0.58)/0.24)*105; g = 84 + ((t-0.58)/0.24)*44; b = 18; }
+  else { r = 214 + ((t-0.82)/0.18)*40; g = 196 + ((t-0.82)/0.18)*50; b = 174 + ((t-0.82)/0.18)*70; }
+  return new THREE.Color(Math.min(1,r/255), Math.min(1,g/255), Math.min(1,b/255));
+}
+
+function contourColor(h, vmin, vmax, level){
+  const t = (level - vmin) / Math.max(1, (vmax - vmin));
+  const c = colorFor(level, vmin, vmax);
+  return c;
+}
+
+/* ================= Terreno (malla definida) ================= */
+function buildTerrain(cols, rows, stepMeters, heights, vmin, vmax){
+  const geometry = new THREE.BufferGeometry();
+  const positions = [];
+  const colors = [];
+  const indices = [];
+
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const idx = row * cols + col;
+      const h = heights[idx];
+      const x = col * stepMeters - centerX;
+      const z = row * stepMeters - centerZ;
+      const y = (h === null || h === undefined ? vmin : h) * exag;
+      positions.push(x, y, z);
+      const c = colorFor(h === null || h === undefined ? vmin : h, vmin, vmax);
+      colors.push(c.r, c.g, c.b);
+    }
+  }
+
+  for (let row = 0; row < rows - 1; row++) {
+    for (let col = 0; col < cols - 1; col++) {
+      const a = row * cols + col;
+      const b = row * cols + (col + 1);
+      const c_ = (row + 1) * cols + col;
+      const d = (row + 1) * cols + (col + 1);
+      indices.push(a, b, c_);
+      indices.push(b, d, c_);
+    }
+  }
+
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.7,
+    metalness: 0.02,
+    flatShading: true, // resalta aristas del relieve
+  });
+  terrainMesh = new THREE.Mesh(geometry, material);
+  terrainMesh.castShadow = true;
+  terrainMesh.receiveShadow = true;
+  scene.add(terrainMesh);
+}
+
+/* ================= Líneas de contorno ================= */
+function buildContours(cols, rows, stepMeters, heights, vmin, vmax){
+  const group = new THREE.Group();
+  group.name = 'contoursGroup';
+
+  const numLevels = 8;
+  const stepH = (vmax - vmin) / numLevels;
+
+  for (let l = 1; l <= numLevels; l++) {
+    const level = vmin + l * stepH;
+    const material = new THREE.LineBasicMaterial({
+      color: contourColor(level, vmin, vmax, level),
+      transparent: true,
+      opacity: 0.55,
+      linewidth: 1.5
+    });
+
+    // Buscar segmentos donde la altura cruza el nivel entre celdas adyacentes
+    const segments = [];
+    for (let row = 0; row < rows - 1; row++) {
+      for (let col = 0; col < cols - 1; col++) {
+        const i00 = row * cols + col;
+        const i10 = row * cols + (col + 1);
+        const i01 = (row + 1) * cols + col;
+        const i11 = (row + 1) * cols + (col + 1);
+        const h00 = heights[i00] === null || heights[i00] === undefined ? vmin : heights[i00];
+        const h10 = heights[i10] === null || heights[i10] === undefined ? vmin : heights[i10];
+        const h01 = heights[i01] === null || heights[i01] === undefined ? vmin : heights[i01];
+        const h11 = heights[i11] === null || heights[i11] === undefined ? vmin : heights[i11];
+
+        const x00 = col * stepMeters - centerX;
+        const z00 = row * stepMeters - centerZ;
+        const x10 = (col + 1) * stepMeters - centerX;
+        const z10 = row * stepMeters - centerZ;
+        const x01 = col * stepMeters - centerX;
+        const z01 = (row + 1) * stepMeters - centerZ;
+        const x11 = (col + 1) * stepMeters - centerX;
+        const z11 = (row + 1) * stepMeters - centerZ;
+
+        const y00 = h00 * exag;
+        const y10 = h10 * exag;
+        const y01 = h01 * exag;
+        const y11 = h11 * exag;
+
+        // Interpolar en los 4 bordes del cuadro
+        const interp = (p1, p2, h1, h2) => {
+          if ((h1 - level) * (h2 - level) > 0) return null;
+          const t = (level - h1) / Math.max(1e-6, (h2 - h1));
+          return {
+            x: p1.x + t * (p2.x - p1.x),
+            y: p1.y + t * (p2.y - p1.y),
+            z: p1.z + t * (p2.z - p1.z)
+          };
+        };
+
+        const pts = [];
+        // borde 00-10
+        const a = interp({x:x00,y:y00,z:z00}, {x:x10,y:y10,z:z10}, h00, h10);
+        if (a) pts.push(a);
+        // borde 10-11
+        const b = interp({x:x10,y:y10,z:z10}, {x:x11,y:y11,z:z11}, h10, h11);
+        if (b) pts.push(b);
+        // borde 11-01
+        const c = interp({x:x11,y:y11,z:z11}, {x:x01,y:y01,z:z01}, h11, h01);
+        if (c) pts.push(c);
+        // borde 01-00
+        const d = interp({x:x01,y:y01,z:z01}, {x:x00,y:y00,z:z00}, h01, h00);
+        if (d) pts.push(d);
+
+        if (pts.length === 2) {
+          segments.push(pts[0].x, pts[0].y, pts[0].z, pts[1].x, pts[1].y, pts[1].z);
+        } else if (pts.length === 4) {
+          // caso de silla: conectar de forma que no se crucen
+          segments.push(pts[0].x, pts[0].y, pts[0].z, pts[1].x, pts[1].y, pts[1].z);
+          segments.push(pts[2].x, pts[2].y, pts[2].z, pts[3].x, pts[3].y, pts[3].z);
+        }
+      }
+    }
+
+    if (segments.length > 0) {
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(segments, 3));
+      const line = new THREE.LineSegments(geom, material);
+      group.add(line);
+    }
+  }
+
+  scene.add(group);
+  contoursGroup = group;
+  contoursGroup.visible = showContours;
+  return group;
+}
+
+/* ================= Plano de veta ================= */
+function buildVein(strikeDeg, dipDeg, dipDirection = 'SE'){
+  if (veinGroup) { scene.remove(veinGroup); veinGroup = null; }
+  const group = new THREE.Group();
+  group.name = 'veinGroup';
+
+  const strikeRad = strikeDeg * Math.PI / 180;
+  const dipRad = dipDeg * Math.PI / 180;
+
+  let strikeAdj = strikeRad;
+  if (dipDirection === 'SE') strikeAdj = strikeRad;
+  if (dipDirection === 'NW') strikeAdj = strikeRad + Math.PI;
+  if (dipDirection === 'NE') strikeAdj = strikeRad - Math.PI / 2;
+  if (dipDirection === 'SW') strikeAdj = strikeRad + Math.PI / 2;
+
+  const veinWidth = 320;
+  const veinHeight = 200;
+  const veinGeom = new THREE.PlaneGeometry(veinWidth, veinHeight);
+  const veinMat = new THREE.MeshStandardMaterial({
+    color: 0x3b82f6, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+    roughness: 0.5, metalness: 0.1, emissive: 0x1e3a8a, emissiveIntensity: 0.25
+  });
+  const veinMesh = new THREE.Mesh(veinGeom, veinMat);
+  veinMesh.rotation.order = 'YXZ';
+  const posY = minCota * exag + 110;
+  veinMesh.position.set(0, posY, 0);
+  veinMesh.rotation.y = strikeAdj;
+  veinMesh.rotation.x = dipRad;
+  veinMesh.castShadow = true;
+  veinMesh.receiveShadow = true;
+
+  const veinEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(veinGeom),
+    new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 1, linewidth: 2 })
+  );
+  veinEdges.rotation.order = 'YXZ';
+  veinEdges.position.copy(veinMesh.position);
+  veinEdges.rotation.y = strikeAdj;
+  veinEdges.rotation.x = dipRad;
+
+  group.add(veinMesh, veinEdges);
+  scene.add(group);
+  veinGroup = group;
+  veinGroup.visible = showVein;
+  return group;
+}
+
+/* ================= Trayectorias ================= */
+function buildTrajectories(){
+  if (trajGroup) { scene.remove(trajGroup); trajGroup = null; }
+  const group = new THREE.Group();
+  group.name = 'trajGroup';
+
+  function createTrajectory(start, end, color){
+    const g = new THREE.Group();
+    const dir = end.clone().sub(start);
+    const len = dir.length();
+    const radius = 2.0;
+
+    const tubeGeom = new THREE.CylinderGeometry(radius, radius, len, 12);
+    const tubeMat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.2 });
+    const tube = new THREE.Mesh(tubeGeom, tubeMat);
+    tube.position.copy(start.clone().add(end).multiplyScalar(0.5));
+    tube.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    tube.castShadow = true;
+
+    const coneGeom = new THREE.ConeGeometry(radius * 2.4, radius * 6, 14);
+    const cone = new THREE.Mesh(coneGeom, tubeMat);
+    cone.position.copy(end);
+    cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.8, 12, 12), tubeMat);
+    sphere.position.copy(start);
+
+    g.add(tube, cone, sphere);
+    return g;
+  }
+
+  const bmEast = -160;
+  const bmNorth = -160;
+  const bmCota = (minCota + maxCota) / 2 * exag + 12;
+
+  const veinEast = 0;
+  const veinNorth = 0;
+  const veinCota = minCota * exag + 110 + 40;
+
+  const epStart = new THREE.Vector3(bmEast, bmCota, bmNorth);
+  const epEnd = new THREE.Vector3(veinEast, veinCota, veinNorth + 120);
+  const epTraj = createTrajectory(epStart, epEnd, 0x22c55e);
+
+  const pcStart = new THREE.Vector3(bmEast - 80, bmCota, bmNorth - 80);
+  const pcEnd = new THREE.Vector3(veinEast + 100, veinCota + 30, veinNorth - 100);
+  const pcTraj = createTrajectory(pcStart, pcEnd, 0x818cf8);
+
+  group.add(epTraj, pcTraj);
+  scene.add(group);
+  trajGroup = group;
+  trajGroup.visible = showTraj;
+  return group;
+}
+
+/* ================= Pines ================= */
+function buildPins(){
+  if (pinsGroup) { scene.remove(pinsGroup); pinsGroup = null; }
+  const group = new THREE.Group();
+  group.name = 'pinsGroup';
+
+  const pinCota = (minCota + maxCota) / 2 * exag + 10;
+
+  function makePin(east, north, cota, color, label){
+    const g = new THREE.Group();
+    const sphere = new THREE.Mesh(
+      new THREE.SphereGeometry(6, 16, 16),
+      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.2 })
+    );
+    sphere.position.set(east, cota, north);
+    sphere.castShadow = true;
+    g.add(sphere);
+
+    const stick = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.0, 1.0, 18, 10),
+      new THREE.MeshStandardMaterial({ color: 0xffffff })
+    );
+    stick.position.set(east, cota + 9, north);
+    stick.rotation.x = Math.PI / 2;
+    g.add(stick);
+
+    const top = new THREE.Mesh(
+      new THREE.ConeGeometry(3.0, 10, 10),
+      new THREE.MeshStandardMaterial({ color })
+    );
+    top.position.set(east, cota + 22, north);
+    top.rotation.x = Math.PI / 2;
+    g.add(top);
+
+    return g;
+  }
+
+  const pinAF = makePin(90, 60, pinCota, 0xf59e0b, 'AF');
+  const pinBM = makePin(-120, -100, pinCota, 0xef4444, 'BM');
+  const pinCorte = makePin(0, 0, minCota * exag + 130, 0x22d3ee, 'Corte');
+
+  group.add(pinAF, pinBM, pinCorte);
+  scene.add(group);
+  pinsGroup = group;
+  pinsGroup.visible = showPins;
+  return group;
+}
+
+/* ================= Ejes y caja ================= */
+function buildAxesAndBox(){
+  if (axesHelper) { scene.remove(axesHelper); axesHelper = null; }
+  if (boxHelper) { scene.remove(boxHelper); boxHelper = null; }
+
+  const size = 300;
+  axesHelper = new THREE.AxesHelper(size);
+  axesHelper.position.set(centerX, 0, centerZ);
+  // Colores: X=Este rojo, Y=Cota verde, Z=Norte azul
+  scene.add(axesHelper);
+
+  // Caja de contención del terreno
+  const box = new THREE.Box3();
+  if (terrainMesh) box.setFromObject(terrainMesh);
+  else {
+    const pad = 150;
+    box.set(new THREE.Vector3(-centerX, minCota * exag, -centerZ),
+            new THREE.Vector3(centerX, maxCota * exag, centerZ));
+  }
+  boxHelper = new THREE.BoxHelper(new THREE.Mesh(new THREE.BoxGeometry(1,1,1)), 0x475569);
+  boxHelper.position.copy(box.getCenter(new THREE.Vector3()));
+  boxHelper.scale.copy(box.getSize(new THREE.Vector3()));
+  boxHelper.material.transparent = true;
+  boxHelper.material.opacity = 0.35;
+  scene.add(boxHelper);
+}
+
+/* ================= Procesar alturas ================= */
+function processHeights(cols, rows, stepMeters, heights, vmin, vmax, originLat, originLng){
+  try {
+    if (terrainMesh) { scene.remove(terrainMesh); terrainMesh.geometry.dispose(); terrainMesh.material.dispose(); terrainMesh = null; }
+    if (contoursGroup) { scene.remove(contoursGroup); contoursGroup = null; }
+    if (veinGroup) { scene.remove(veinGroup); veinGroup = null; }
+    if (trajGroup) { scene.remove(trajGroup); trajGroup = null; }
+    if (pinsGroup) { scene.remove(pinsGroup); pinsGroup = null; }
+    if (axesHelper) { scene.remove(axesHelper); axesHelper = null; }
+    if (boxHelper) { scene.remove(boxHelper); boxHelper = null; }
+
+    currentCols = cols;
+    currentRows = rows;
+    currentStep = stepMeters;
+    currentHeights = new Float32Array(heights.map(h => h === null || h === undefined ? vmin : h));
+    currentOriginLat = originLat;
+    currentOriginLng = originLng;
+    minCota = vmin;
+    maxCota = vmax;
+
+    centerX = ((cols - 1) * stepMeters) / 2;
+    centerZ = ((rows - 1) * stepMeters) / 2;
+
+    geoEl.textContent = originLat.toFixed(4) + ', ' + originLng.toFixed(4) + ' &mdash; Cusco, Per&uacute; (OpenTopoData SRTM 30m)';
+    modeBadge.textContent = 'Modo: API + Veta';
+    status.textContent = 'Relieve cargado desde OpenTopoData y modelado en Three.js.';
+    status.className = 'hint ok';
+    btnReload.disabled = false;
+    statsBox.style.display = 'grid';
+    legend.style.display = 'flex';
+
+    elDim.textContent = cols + ' x ' + rows + ' puntos (' + stepMeters.toFixed(0) + ' m paso)';
+    elMin.textContent = vmin.toFixed(0) + ' m';
+    elMax.textContent = vmax.toFixed(0) + ' m';
+    const mean = heights.reduce((s,h)=>s+(h===null||h===undefined?vmin:h),0)/heights.length;
+    elMean.textContent = mean.toFixed(1) + ' m';
+
+    buildTerrain(cols, rows, stepMeters, heights, vmin, vmax);
+    buildContours(cols, rows, stepMeters, heights, vmin, vmax);
+
+    const strike = parseFloat(inpStrike.value);
+    const dip = parseFloat(inpDip.value);
+    buildVein(strike, dip, 'SE');
+    buildTrajectories();
+    buildPins();
+    buildAxesAndBox();
+
+    applyLayerVisibility();
+
+    const midY = ((vmin + vmax) / 2) * exag;
+    camera.position.set(centerX + 850, midY + 700, centerZ + 850);
+    camera.lookAt(0, midY, 0);
+    controls.target.set(0, midY, 0);
+    controls.update();
+
+  } catch (err) {
+    status.textContent = 'Error: ' + err.message;
+    status.className = 'hint err';
+    btnReload.disabled = false;
+  }
+}
+
+function applyLayerVisibility(){
+  if (terrainMesh) terrainMesh.visible = showTerrain;
+  if (contoursGroup) contoursGroup.visible = showContours;
+  if (veinGroup) veinGroup.visible = showVein;
+  if (trajGroup) trajGroup.visible = showTraj;
+  if (pinsGroup) pinsGroup.visible = showPins;
+  if (axesHelper) axesHelper.visible = showAxes;
+  if (boxHelper) boxHelper.visible = showBox;
+}
+
+/* ================= OpenTopoData API ================= */
+function buildGridLocations(lat0, lng0, cols, rows, stepDeg){
+  const locs = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const lat = lat0 - r * stepDeg;
+      const lng = lng0 + c * stepDeg;
+      locs.push(lat.toFixed(5) + ',' + lng.toFixed(5));
+    }
+  }
+  return locs.join('|');
+}
+
+function loadOpenTopoData(){
+  const lat0 = -13.53;
+  const lng0 = -71.97;
+  const cols = 10;
+  const rows = 10;
+  const stepDeg = 0.005;
+
+  const locations = buildGridLocations(lat0, lng0, cols, rows, stepDeg);
+  const url = 'https://api.opentopodata.org/v1/srtm30m?locations=' + encodeURIComponent(locations);
+
+  status.textContent = 'Consultando OpenTopoData API...';
+  status.className = 'hint';
+
+  fetch(url)
+    .then(res => res.json())
+    .then(data => {
+      if (data.status !== 'OK') throw new Error('API status: ' + data.status);
+      const heights = data.results.map(r => r.elevation);
+      const stepMeters = stepDeg * 111320 * Math.cos(lat0 * Math.PI / 180);
+      const vmin = Math.min(...heights);
+      const vmax = Math.max(...heights);
+      processHeights(cols, rows, stepMeters, heights, vmin, vmax, lat0, lng0);
+    })
+    .catch(err => {
+      status.textContent = 'Error API: ' + err.message + ' &mdash; carga archivo .hgt local';
+      status.className = 'hint err';
+    });
+}
+
+/* ================= Archivo .hgt local ================= */
+function parseHgt(buffer){
+  const len = buffer.byteLength;
+  let n;
+  if (len === 3601 * 3601 * 2) n = 3601;
+  else if (len === 1201 * 1201 * 2) n = 1201;
+  else throw new Error('Tamaño no reconocido: ' + len + ' bytes');
+
+  const u16 = new Uint16Array(buffer);
+  if (new Uint8Array(new Uint16Array([1]).buffer)[0] === 1) {
+    for (let i = 0; i < u16.length; i++) {
+      const v = u16[i];
+      u16[i] = ((v >>> 8) | (v << 8)) & 0xffff;
+    }
+  }
+  return { n, data: new Int16Array(u16.buffer) };
+}
+
+function processHgtFile(buffer){
+  try {
+    const { n, data } = parseHgt(buffer);
+    let vmin = Infinity, vmax = -Infinity;
+    const NODATA = -32768;
+    for (let i = 0; i < data.length; i++) {
+      const v = data[i];
+      if (v === NODATA) continue;
+      if (v < vmin) vmin = v;
+      if (v > vmax) vmax = v;
+    }
+
+    const step = Math.max(1, Math.floor(n / 65));
+    const cols = Math.floor(n / step);
+    const rows = Math.floor(n / step);
+    const heights = [];
+    for (let y = 0; y < n; y += step) {
+      for (let x = 0; x < n; x += step) {
+        const v = data[y * n + x];
+        heights.push(v === NODATA ? null : v);
+      }
+    }
+
+    const originLat = -13.5;
+    const originLng = -72.0;
+    const stepMeters = step * 30;
+    processHeights(cols, rows, stepMeters, heights, vmin, vmax, originLat, originLng);
+    modeBadge.textContent = 'Modo: Archivo .hgt + Veta';
+  } catch (err) {
+    status.textContent = 'Error .hgt: ' + err.message;
+    status.className = 'hint err';
+    btnReload.disabled = false;
+  }
+}
+
+/* ================= Vistas ================= */
+function setView(kind){
+  const midY = ((minCota + maxCota) / 2) * exag;
+  if (kind === 'iso'){
+    camera.position.set(centerX + 850, midY + 700, centerZ + 850);
+    camera.lookAt(0, midY, 0);
+  } else if (kind === 'front'){
+    camera.position.set(centerX, midY + 600, centerZ + 1100);
+    camera.lookAt(0, midY, 0);
+  } else if (kind === 'top'){
+    camera.position.set(centerX, midY + 1800, centerZ);
+    camera.lookAt(0, midY, 0);
+  }
+  controls.target.set(0, midY, 0);
+  controls.update();
+}
+
+/* ================= UI ================= */
+inpStrike.addEventListener('input', () => {
+  valStrike.textContent = inpStrike.value + '&deg;';
+  if (veinGroup) buildVein(parseFloat(inpStrike.value), parseFloat(inpDip.value), 'SE');
+});
+inpDip.addEventListener('input', () => {
+  valDip.textContent = inpDip.value + '&deg;';
+  if (veinGroup) buildVein(parseFloat(inpStrike.value), parseFloat(inpDip.value), 'SE');
+});
+inpExag.addEventListener('input', () => {
+  valExag.textContent = inpExag.value + 'x';
+  exag = parseFloat(inpExag.value);
+  if (currentHeights) {
+    processHeights(currentCols, currentRows, currentStep, Array.from(currentHeights), minCota, maxCota, currentOriginLat, currentOriginLng);
+  }
+});
+
+btnReload.addEventListener('click', () => {
+  const midY = ((minCota + maxCota) / 2) * exag;
+  camera.position.set(centerX + 850, midY + 700, centerZ + 850);
+  camera.lookAt(0, midY, 0);
+  controls.target.set(0, midY, 0);
+  controls.update();
+});
+
+btnViewIso.addEventListener('click', () => setView('iso'));
+btnViewFront.addEventListener('click', () => setView('front'));
+btnViewTop.addEventListener('click', () => setView('top'));
+
+chkTerrain.addEventListener('change', () => { showTerrain = chkTerrain.checked; applyLayerVisibility(); });
+chkContours.addEventListener('change', () => { showContours = chkContours.checked; applyLayerVisibility(); });
+chkVein.addEventListener('change', () => { showVein = chkVein.checked; applyLayerVisibility(); });
+chkTraj.addEventListener('change', () => { showTraj = chkTraj.checked; applyLayerVisibility(); });
+chkPins.addEventListener('change', () => { showPins = chkPins.checked; applyLayerVisibility(); });
+chkAxes.addEventListener('change', () => { showAxes = chkAxes.checked; applyLayerVisibility(); });
+chkBox.addEventListener('change', () => { showBox = chkBox.checked; applyLayerVisibility(); });
+
+btnVein.addEventListener('click', () => {
+  showTerrain = showContours = showVein = showTraj = showPins = showAxes = showBox = true;
+  chkTerrain.checked = chkContours.checked = chkVein.checked = chkTraj.checked = chkPins.checked = chkAxes.checked = chkBox.checked = true;
+  applyLayerVisibility();
+});
+btnHide.addEventListener('click', () => {
+  showTerrain = showContours = showVein = showTraj = showPins = showAxes = showBox = false;
+  chkTerrain.checked = chkContours.checked = chkVein.checked = chkTraj.checked = chkPins.checked = chkAxes.checked = chkBox.checked = false;
+  applyLayerVisibility();
+});
+
+fileInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => processHgtFile(ev.target.result);
+  reader.readAsArrayBuffer(f);
+});
+
+btnLoadApi.addEventListener('click', loadOpenTopoData);
+
+/* ================= Loop ================= */
+function animate(){
+  requestAnimationFrame(animate);
+  if (scene) { controls.update(); }
+  renderer.render(scene, camera);
+}
+
+initThree();
+loadOpenTopoData();
+animate();
+</script>
+</body>
+</html>
